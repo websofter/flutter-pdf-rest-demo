@@ -11,6 +11,13 @@ Flutter приложение для просмотра PDF документов 
 ## Быстрый Запуск
 
 ### 1. Запуск Backend
+#### dev
+```bash
+cd backend
+go run main.go
+```
+
+#### prod
 ```bash
 cd backend
 go mod tidy
@@ -23,7 +30,7 @@ go build -o server main.go
 ```bash
 cd app
 flutter pub get
-flutter run
+flutter run -d linux
 ```
 
 ## Использование
