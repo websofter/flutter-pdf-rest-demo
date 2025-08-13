@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'helper/save_helper.dart'
     if (dart.library.html) 'helper/save_helper_web.dart';
 import 'package:flutter/material.dart';
@@ -64,15 +65,18 @@ class Post {
   }
 }
 
-class _PdfViewerState extends State<PdfViewer> {
+class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   final PdfViewerController _pdfViewerController = PdfViewerController();
-  Uint8List? _pdfBytes;
   String? _pdfFilePath;
   double _zoomLevel = 1.0;
   bool _isLoading = false;
   bool _showSidebar = false;
   bool _showPostsSidebar = true;
   int _totalPages = 0;
+  double _loadingProgress = 0.0;
+  String _loadingStatus = 'Loading...';
+  AnimationController? _loadingAnimationController;
+  Animation<double>? _loadingAnimation;
   
   // Posts management
   List<Post> _posts = [];
@@ -86,13 +90,64 @@ class _PdfViewerState extends State<PdfViewer> {
   void initState() {
     super.initState();
     _loadPosts();
+    _initializeAnimation();
+  }
+  
+  void _initializeAnimation() {
+    _loadingAnimationController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    );
+    _loadingAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _loadingAnimationController!,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _loadingAnimationController?.dispose();
+    super.dispose();
+  }
+
+  /// Simulate loading with smooth progress without blocking I/O
+  Future<void> _simulateLoadingProgress() async {
+    // Start loading animation
+    _loadingAnimationController?.repeat();
+    
+    // Simulate gradual progress updates
+    final progressSteps = [
+      (0.1, 'Initializing...', 150),
+      (0.25, 'Reading file...', 200),
+      (0.5, 'Processing...', 300),
+      (0.75, 'Rendering...', 250),
+      (0.9, 'Almost done...', 200),
+      (1.0, 'Complete', 100),
+    ];
+    
+    for (final (progress, status, delayMs) in progressSteps) {
+      if (!mounted) break;
+      
+      setState(() {
+        _loadingProgress = progress;
+        _loadingStatus = status;
+      });
+      
+      await Future.delayed(Duration(milliseconds: delayMs));
+    }
+    
+    // Stop animation
+    _loadingAnimationController?.stop();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: (_pdfBytes != null || _pdfFilePath != null)
+        title: _pdfFilePath != null
           ? Text('Page ${_pdfViewerController.pageNumber}/${_pdfViewerController.pageCount}')
           : null,
         actions: [
@@ -119,7 +174,7 @@ class _PdfViewerState extends State<PdfViewer> {
               tooltip: 'Delete Post',
               color: Colors.red,
             ),
-          if (_pdfBytes != null || _pdfFilePath != null) ...[
+          if (_pdfFilePath != null) ...[
             IconButton(
               onPressed: () {
                 setState(() {
@@ -196,7 +251,7 @@ class _PdfViewerState extends State<PdfViewer> {
       body: Row(
         children: [
           // Left sidebar - PDF thumbnails (only when PDF is loaded)
-          if (_showSidebar && (_pdfBytes != null || _pdfFilePath != null)) ...[
+          if (_showSidebar && _pdfFilePath != null) ...[
             Container(
               width: 200,
               decoration: BoxDecoration(
@@ -211,19 +266,92 @@ class _PdfViewerState extends State<PdfViewer> {
           
           // Main content area
           Expanded(
-            child: (_pdfBytes == null && _pdfFilePath == null)
+            child: _pdfFilePath == null
                 ? const Center(
                     child: Text('Choose a PDF file to open'),
                   )
                 : _isLoading
-                    ? const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text('Loading PDF...'),
-                          ],
+                    ? Center(
+                        child: AnimatedBuilder(
+                          animation: _loadingAnimation ?? const AlwaysStoppedAnimation(0.0),
+                          builder: (context, child) {
+                            return Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: 80,
+                                  height: 80,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(15),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.1),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    value: _loadingProgress > 0 ? _loadingProgress : null,
+                                    backgroundColor: Colors.grey[200],
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Theme.of(context).primaryColor,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                                AnimatedDefaultTextStyle(
+                                  duration: const Duration(milliseconds: 300),
+                                  style: Theme.of(context).textTheme.titleMedium!.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  child: Text(_loadingStatus),
+                                ),
+                                const SizedBox(height: 12),
+                                if (_loadingProgress > 0) ...[
+                                  TweenAnimationBuilder<double>(
+                                    duration: const Duration(milliseconds: 200),
+                                    tween: Tween(begin: 0, end: _loadingProgress),
+                                    builder: (context, value, child) {
+                                      return Column(
+                                        children: [
+                                          Container(
+                                            width: 200,
+                                            height: 4,
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[200],
+                                              borderRadius: BorderRadius.circular(2),
+                                            ),
+                                            child: FractionallySizedBox(
+                                              alignment: Alignment.centerLeft,
+                                              widthFactor: value,
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context).primaryColor,
+                                                  borderRadius: BorderRadius.circular(2),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            '${(value * 100).toInt()}%',
+                                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                              color: Colors.grey[600],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
                         ),
                       )
                     : Column(
@@ -304,46 +432,39 @@ class _PdfViewerState extends State<PdfViewer> {
         
         setState(() {
           _isLoading = true;
-          _pdfBytes = null;
           _pdfFilePath = null;
+          _loadingProgress = 0.0;
+          _loadingStatus = 'Initializing...';
         });
         
-        // Show progress info for large files
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Loading ${(file.size / 1024 / 1024).toStringAsFixed(1)}MB PDF file...'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
+        final filePath = !kIsWeb ? file.path! : null;
         
         if (kIsWeb) {
-          _pdfBytes = file.bytes;
-          print('Web: PDF bytes loaded, size: ${_pdfBytes?.length}');
-        } else {
-          final filePath = file.path!;
-          print('Mobile: Loading from path: $filePath');
-          
-          // For very large files, keep file path and use SfPdfViewer.file()
-          // instead of loading entire file into memory
-          if (file.size > 100 * 1024 * 1024) { // 100MB
-            print('Large file detected, using file-based loading');
+          print('Web platform not fully supported for file-based loading');
+          if (mounted) {
             setState(() {
               _isLoading = false;
-              _pdfFilePath = filePath;
             });
-            return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Web platform: Please use desktop/mobile version for better performance'),
+                backgroundColor: Colors.orange,
+              ),
+            );
           }
-          
-          // Load smaller files into memory
-          await Future.delayed(const Duration(milliseconds: 50));
-          _pdfBytes = await File(filePath).readAsBytes();
-          print('Mobile: PDF bytes loaded, size: ${_pdfBytes?.length}');
+          return;
         }
         
+        print('Loading file from path: $filePath');
+        
+        // Use file-based loading for all files to avoid memory issues and UI blocking
+        await _simulateLoadingProgress();
+        
         if (mounted) {
-          setState(() {});
+          setState(() {
+            _isLoading = false;
+            _pdfFilePath = filePath;
+          });
         }
       } else {
         print('No file selected');
@@ -351,7 +472,6 @@ class _PdfViewerState extends State<PdfViewer> {
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _pdfBytes = null;
         _pdfFilePath = null;
       });
       if (mounted) {
@@ -363,105 +483,52 @@ class _PdfViewerState extends State<PdfViewer> {
   }
 
   Widget _buildPdfViewer() {
-    if (_pdfFilePath != null) {
-      // Use file-based viewer for large files (better memory management)
-      return SfPdfViewer.file(
-        File(_pdfFilePath!),
-        controller: _pdfViewerController,
-        pageLayoutMode: PdfPageLayoutMode.single,
-        scrollDirection: PdfScrollDirection.vertical,
-        pageSpacing: 4,
-        canShowPaginationDialog: false,
-        enableTextSelection: false, // Disabled for better performance
-        enableHyperlinkNavigation: true,
-        onPageChanged: (PdfPageChangedDetails details) {
-          if (mounted) {
-            setState(() {});
-          }
-        },
-        onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-          print('Large PDF loaded successfully: ${details.document.pages.count} pages');
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _totalPages = details.document.pages.count;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Large PDF loaded: ${details.document.pages.count} pages (optimized mode)'),
-                backgroundColor: Colors.green,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
-        },
-        onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
-          print('Large PDF load failed: ${details.error}, ${details.description}');
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _pdfFilePath = null;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to load PDF: ${details.description}'),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
-        },
-      );
-    } else {
-      // Use memory-based viewer for smaller files
-      return SfPdfViewer.memory(
-        _pdfBytes!,
-        controller: _pdfViewerController,
-        pageLayoutMode: PdfPageLayoutMode.single,
-        scrollDirection: PdfScrollDirection.vertical,
-        pageSpacing: 4,
-        canShowPaginationDialog: false,
-        enableTextSelection: true,
-        enableHyperlinkNavigation: true,
-        onPageChanged: (PdfPageChangedDetails details) {
-          if (mounted) {
-            setState(() {});
-          }
-        },
-        onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-          print('PDF loaded successfully: ${details.document.pages.count} pages');
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _totalPages = details.document.pages.count;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('PDF loaded: ${details.document.pages.count} pages'),
-                backgroundColor: Colors.green,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
-        },
-        onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
-          print('PDF load failed: ${details.error}, ${details.description}');
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _pdfBytes = null;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to load PDF: ${details.description}'),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
-        },
-      );
-    }
+    // Use file-based viewer only (no memory loading)
+    return SfPdfViewer.file(
+      File(_pdfFilePath!),
+      controller: _pdfViewerController,
+      pageLayoutMode: PdfPageLayoutMode.single,
+      scrollDirection: PdfScrollDirection.vertical,
+      pageSpacing: 4,
+      canShowPaginationDialog: false,
+      enableTextSelection: true,
+      enableHyperlinkNavigation: true,
+      onPageChanged: (PdfPageChangedDetails details) {
+        if (mounted) {
+          setState(() {});
+        }
+      },
+      onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+        print('PDF loaded successfully: ${details.document.pages.count} pages');
+        if (mounted) {
+          setState(() {
+            _totalPages = details.document.pages.count;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('PDF loaded: ${details.document.pages.count} pages'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+      onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
+        print('PDF load failed: ${details.error}, ${details.description}');
+        if (mounted) {
+          setState(() {
+            _pdfFilePath = null;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to load PDF: ${details.description}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+    );
   }
 
   Widget _buildThumbnailSidebar() {
