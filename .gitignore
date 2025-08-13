@@ -61,11 +61,10 @@ vendor/
 *.swo
 *~
 .DS_Store
-
+server
+*.pdf
 # Docker
 .dockerignore
-Dockerfile*
-docker-compose*.yml
 .env
 .env.local
 .env.*.local
