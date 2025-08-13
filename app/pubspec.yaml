@@ -13,6 +13,7 @@ dependencies:
     sdk: flutter
   file_picker: ^8.0.0+1
   syncfusion_flutter_pdfviewer:
+  http: ^1.1.0
 
 dev_dependencies:
   flutter_test:
